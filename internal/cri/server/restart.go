@@ -70,7 +70,6 @@ func (c *criService) recover(ctx context.Context) error {
 
 	eg, ctx2 := errgroup.WithContext(ctx)
 	for _, sandbox := range sandboxes {
-		sandbox := sandbox
 		eg.Go(func() error {
 			sb, err := podSandboxLoader.RecoverContainer(ctx2, sandbox)
 			if err != nil {
@@ -161,7 +160,6 @@ func (c *criService) recover(ctx context.Context) error {
 	}
 
 	for _, sb := range c.sandboxStore.List() {
-		sb := sb
 		status := sb.Status.Get()
 		if status.State == sandboxstore.StateNotReady {
 			continue
@@ -180,7 +178,6 @@ func (c *criService) recover(ctx context.Context) error {
 	}
 	eg, ctx2 = errgroup.WithContext(ctx)
 	for _, container := range containers {
-		container := container
 		eg.Go(func() error {
 			cntr, err := c.loadContainer(ctx2, container)
 			if err != nil {
