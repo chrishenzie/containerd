@@ -64,6 +64,7 @@ type Getter interface {
 type Store struct {
 	lock sync.RWMutex
 	// refCache is a containerd image reference to image id cache.
+	// TODO: Remove this; fetch images from core image service directly.
 	refCache map[string]string
 
 	// images is the local image store
@@ -112,6 +113,13 @@ func (s *Store) Update(ctx context.Context, ref string) error {
 			return fmt.Errorf("get image info from containerd: %w", err)
 		}
 	}
+
+	parsedRef, err := docker.ParseAnyReference(ref)
+	if err != nil {
+		return fmt.Errorf("failed to parse image reference %q: %w", ref, err)
+	}
+	ref = parsedRef.String()
+
 	return s.update(ref, img)
 }
 
