@@ -28,6 +28,7 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/sandbox"
 	criconfig "github.com/containerd/containerd/v2/internal/cri/config"
+	"github.com/containerd/containerd/v2/internal/cri/nri"
 	containerstore "github.com/containerd/containerd/v2/internal/cri/store/container"
 	"github.com/containerd/containerd/v2/internal/cri/store/label"
 	sandboxstore "github.com/containerd/containerd/v2/internal/cri/store/sandbox"
@@ -119,6 +120,10 @@ type fakeRuntimeService struct {
 
 func (f fakeRuntimeService) Config() criconfig.Config {
 	return testConfig
+}
+
+func (f fakeRuntimeService) NRI() *nri.API {
+	return nil
 }
 
 func (f fakeRuntimeService) LoadOCISpec(filename string) (*oci.Spec, error) {

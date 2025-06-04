@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/v2/core/sandbox"
 	criconfig "github.com/containerd/containerd/v2/internal/cri/config"
 	"github.com/containerd/containerd/v2/internal/cri/constants"
+	"github.com/containerd/containerd/v2/internal/cri/nri"
 	"github.com/containerd/containerd/v2/internal/cri/server/events"
 	"github.com/containerd/containerd/v2/internal/cri/server/podsandbox/types"
 	imagestore "github.com/containerd/containerd/v2/internal/cri/store/image"
@@ -86,6 +87,7 @@ func init() {
 				runtimeService: runtimeService,
 				imageService:   criImagePlugin.(ImageService),
 				store:          NewStore(),
+				nri:            runtimeService.NRI(),
 			}
 
 			eventMonitor := events.NewEventMonitor(&podSandboxEventHandler{
@@ -103,6 +105,7 @@ func init() {
 // RuntimeService specifies dependencies to CRI runtime service.
 type RuntimeService interface {
 	Config() criconfig.Config
+	NRI() *nri.API
 	LoadOCISpec(string) (*oci.Spec, error)
 }
 
@@ -129,6 +132,8 @@ type Controller struct {
 	// eventMonitor is the event monitor for podsandbox controller to handle sandbox task exit event
 	// actually we only use it's backoff mechanism to make sure pause container is cleaned up.
 	eventMonitor *events.EventMonitor
+	// nri is an interface for NRI operations.
+	nri *nri.API
 
 	store *Store
 }

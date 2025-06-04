@@ -89,6 +89,8 @@ type sandboxService interface {
 type RuntimeService interface {
 	Config() criconfig.Config
 
+	NRI() *nri.API
+
 	// LoadCISpec loads cached OCI specs via `Runtime.BaseRuntimeSpec`
 	LoadOCISpec(string) (*oci.Spec, error)
 }
@@ -366,6 +368,11 @@ func (c *criService) Close() error {
 // IsInitialized indicates whether CRI service has finished initialization.
 func (c *criService) IsInitialized() bool {
 	return c.initialized.Load()
+}
+
+// NRI returns the node runtime interface API.
+func (c *criService) NRI() *nri.API {
+	return c.nri
 }
 
 func (c *criService) introspectRuntimeHandler(ctx context.Context, intro introspection.Service, name string, r config.Runtime) error {
