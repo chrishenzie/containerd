@@ -23,8 +23,6 @@ import (
 	"path/filepath"
 
 	"github.com/containerd/log"
-	"github.com/containerd/nri"
-	v1 "github.com/containerd/nri/types/v1"
 	"github.com/containerd/typeurl/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/opencontainers/selinux/go-selinux"
@@ -248,7 +246,7 @@ func (c *Controller) Start(ctx context.Context, id string) (cin sandbox.Controll
 			deferCtx, deferCancel := ctrdutil.DeferContext()
 			defer deferCancel()
 			// Cleanup the sandbox container if an error is returned.
-			if _, err := task.Delete(deferCtx, WithNRISandboxDelete(id), containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
+			if _, err := task.Delete(deferCtx, WithNRISandboxDelete(c.nri, id), containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
 				log.G(ctx).WithError(err).Errorf("Failed to delete sandbox container %q", id)
 				cleanupErr = err
 			}
@@ -261,18 +259,13 @@ func (c *Controller) Start(ctx context.Context, id string) (cin sandbox.Controll
 		return cin, fmt.Errorf("failed to wait for sandbox container task: %w", err)
 	}
 
-	nric, err := nri.New()
+	defer c.nri.BlockPluginSync().Unblock()
+
+	// TODO: This seems off -- where do I get this sandbox from to pass to NRI?
+	sandbox := sandboxstore.NewSandbox()
+	err = c.nri.RunPodSandbox(ctx, &sandbox)
 	if err != nil {
-		return cin, fmt.Errorf("unable to create nri client: %w", err)
-	}
-	if nric != nil {
-		nriSB := &nri.Sandbox{
-			ID:     id,
-			Labels: config.Labels,
-		}
-		if _, err := nric.InvokeWithSandbox(ctx, task, v1.Create, nriSB); err != nil {
-			return cin, fmt.Errorf("nri invoke: %w", err)
-		}
+		return cin, fmt.Errorf("NRI RunPodSandbox failed: %w", err)
 	}
 
 	if err := task.Start(ctx); err != nil {

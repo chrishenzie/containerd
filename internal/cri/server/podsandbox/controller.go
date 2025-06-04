@@ -182,7 +182,7 @@ func (c *Controller) waitSandboxExit(ctx context.Context, p *types.PodSandbox, e
 		dctx, dcancel := context.WithTimeout(dctx, handleEventTimeout)
 		defer dcancel()
 		event := &eventtypes.TaskExit{ExitStatus: exitStatus, ExitedAt: protobuf.ToTimestamp(exitedAt)}
-		if err := handleSandboxTaskExit(dctx, p, event); err != nil {
+		if err := c.handleSandboxTaskExit(dctx, p, event); err != nil {
 			c.eventMonitor.Backoff(p.ID, event)
 		}
 		return nil
@@ -192,7 +192,7 @@ func (c *Controller) waitSandboxExit(ctx context.Context, p *types.PodSandbox, e
 }
 
 // handleSandboxTaskExit handles TaskExit event for sandbox.
-func handleSandboxTaskExit(ctx context.Context, sb *types.PodSandbox, e *eventtypes.TaskExit) error {
+func (c *Controller) handleSandboxTaskExit(ctx context.Context, sb *types.PodSandbox, e *eventtypes.TaskExit) error {
 	// No stream attached to sandbox container.
 	task, err := sb.Container.Task(ctx, nil)
 	if err != nil {
@@ -201,7 +201,7 @@ func handleSandboxTaskExit(ctx context.Context, sb *types.PodSandbox, e *eventty
 		}
 	} else {
 		// TODO(random-liu): [P1] This may block the loop, we may want to spawn a worker
-		if _, err = task.Delete(ctx, WithNRISandboxDelete(sb.ID), containerd.WithProcessKill); err != nil {
+		if _, err = task.Delete(ctx, WithNRISandboxDelete(c.nri, sb.ID), containerd.WithProcessKill); err != nil {
 			if !errdefs.IsNotFound(err) {
 				return fmt.Errorf("failed to stop sandbox: %w", err)
 			}

@@ -20,31 +20,27 @@ import (
 	"context"
 
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/internal/cri/nri"
+	sstore "github.com/containerd/containerd/v2/internal/cri/store/sandbox"
 	"github.com/containerd/log"
-	"github.com/containerd/nri"
-	v1 "github.com/containerd/nri/types/v1"
 )
 
 // WithNRISandboxDelete calls delete for a sandbox'd task
-func WithNRISandboxDelete(sandboxID string) containerd.ProcessDeleteOpts {
+func WithNRISandboxDelete(nri *nri.API, sandboxID string) containerd.ProcessDeleteOpts {
 	return func(ctx context.Context, p containerd.Process) error {
 		task, ok := p.(containerd.Task)
 		if !ok {
 			return nil
 		}
-		nric, err := nri.New()
-		if err != nil {
-			log.G(ctx).WithError(err).Error("unable to create nri client")
+		if nri == nil || nri.IsDisabled() {
 			return nil
 		}
-		if nric == nil {
-			return nil
+		sb := &sstore.Sandbox{
+			Metadata: sstore.Metadata{ID: sandboxID},
 		}
-		sb := &nri.Sandbox{
-			ID: sandboxID,
-		}
-		if _, err := nric.InvokeWithSandbox(ctx, task, v1.Delete, sb); err != nil {
-			log.G(ctx).WithError(err).Errorf("Failed to delete nri for %q", task.ID())
+		defer nri.BlockPluginSync().Unblock()
+		if err := nri.RemovePodSandbox(ctx, sb); err != nil {
+			log.G(ctx).WithError(err).Errorf("Failed to remove pod sandbox in nri for %q", task.ID())
 		}
 		return nil
 	}
