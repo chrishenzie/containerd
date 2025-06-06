@@ -60,6 +60,7 @@ func (c *criService) CreateContainer(ctx context.Context, r *runtime.CreateConta
 	span := tracing.SpanFromContext(ctx)
 	config := r.GetConfig()
 	log.G(ctx).Debugf("Container config %+v", config)
+	log.G(ctx).Debugf("CreateContainer request %+v", r)
 	sandboxConfig := r.GetSandboxConfig()
 	sandbox, err := c.sandboxStore.Get(r.GetPodSandboxId())
 	if err != nil {
