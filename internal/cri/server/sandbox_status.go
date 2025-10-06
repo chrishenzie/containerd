@@ -72,6 +72,8 @@ func (c *criService) PodSandboxStatus(ctx context.Context, r *runtime.PodSandbox
 		info = cstatus.Info
 	}
 
+	setUpdatedResources(sandbox, info)
+
 	status := toCRISandboxStatus(sandbox.Metadata, state, createdAt, ip, additionalIPs)
 	if status.GetCreatedAt() == 0 {
 		// CRI doesn't allow CreatedAt == 0.
@@ -106,6 +108,12 @@ func (c *criService) getIPs(sandbox sandboxstore.Sandbox) (string, []string, err
 	return sandbox.IP, sandbox.AdditionalIPs, nil
 }
 
+// setUpdatedResources sets updated pod sandbox resources in the sandbox info.
+func setUpdatedResources(sandbox sandboxstore.Sandbox, info map[string]string) {
+	info["overhead"] = sandbox.Status.Get().Overhead
+	info["resources"] = sandbox.Status.Get().Resources
+}
+
 // toCRISandboxStatus converts sandbox metadata into CRI pod sandbox status.
 func toCRISandboxStatus(meta sandboxstore.Metadata, status string, createdAt time.Time, ip string, additionalIPs []string) *runtime.PodSandboxStatus {
 	// Set sandbox state to NOTREADY by default.
@@ -118,6 +126,7 @@ func toCRISandboxStatus(meta sandboxstore.Metadata, status string, createdAt tim
 	for _, additionalIP := range additionalIPs {
 		ips = append(ips, &runtime.PodIP{Ip: additionalIP})
 	}
+	// TODO: I think this might be the method we need to update.
 	return &runtime.PodSandboxStatus{
 		Id:        meta.ID,
 		Metadata:  meta.Config.GetMetadata(),

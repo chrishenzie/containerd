@@ -22,6 +22,7 @@ import (
 
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
+	"github.com/containerd/containerd/v2/internal/cri/server/podsandbox"
 	sstore "github.com/containerd/containerd/v2/internal/cri/store/sandbox"
 	"github.com/containerd/containerd/v2/pkg/tracing"
 	"github.com/containerd/log"
@@ -38,6 +39,7 @@ func (c *criService) UpdatePodSandboxResources(ctx context.Context, r *runtime.U
 
 	overhead := r.GetOverhead()
 	resources := r.GetResources()
+
 	err = c.nri.UpdatePodSandboxResources(ctx, &sandbox, overhead, resources)
 	if err != nil {
 		return nil, fmt.Errorf("NRI sandbox update failed: %w", err)
@@ -55,7 +57,25 @@ func (c *criService) UpdatePodSandboxResources(ctx context.Context, r *runtime.U
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to update sandbox store: %w", err)
+		return nil, fmt.Errorf("failed to update sandbox status store: %w", err)
+	}
+
+	// log.G(ctx).Infof("DEBUG: Updated sandbox status in-memory for %s with resources: %+v and overhead: %+v", sandbox.ID, sandbox.Status.Get().Resources, sandbox.Status.Get().Overhead)
+
+	sandboxInfo, err := c.client.SandboxStore().Get(ctx, sandbox.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sandbox %s from sandbox store: %w", sandbox.ID, err)
+	}
+
+	updatedRes := podsandbox.UpdatedResources{
+		Overhead:  overhead,
+		Resources: resources,
+	}
+	if err := sandboxInfo.AddExtension(podsandbox.UpdatedResourcesKey, &updatedRes); err != nil {
+		return nil, fmt.Errorf("failed to add updated sandbox resources extension: %w", err)
+	}
+	if _, err := c.client.SandboxStore().Update(ctx, sandboxInfo, "extensions"); err != nil {
+		return nil, fmt.Errorf("failed to update sandbox %s in core store: %w", sandbox.ID, err)
 	}
 
 	err = c.nri.PostUpdatePodSandboxResources(ctx, &sandbox)

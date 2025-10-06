@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/log"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
@@ -150,10 +151,12 @@ func (s *statusStorage) Get() Status {
 func (s *statusStorage) Update(u UpdateFunc) error {
 	s.Lock()
 	defer s.Unlock()
+	oldStatus := s.status
 	newStatus, err := u(s.status)
 	if err != nil {
 		return err
 	}
 	s.status = newStatus
+	log.L.Infof("DEBUG: statusStorage.Update. Old status: %+v, New status: %+v", oldStatus, newStatus)
 	return nil
 }

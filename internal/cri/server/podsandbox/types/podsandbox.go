@@ -31,8 +31,9 @@ type PodSandbox struct {
 	Container containerd.Container
 	Metadata  sandboxstore.Metadata
 	Runtime   sandbox.RuntimeOpts
-	Status    sandboxstore.StatusStorage
-	stopChan  *store.StopCh
+	// This has StatusStorage
+	Status   sandboxstore.StatusStorage
+	stopChan *store.StopCh
 }
 
 func NewPodSandbox(id string, status sandboxstore.Status) *PodSandbox {

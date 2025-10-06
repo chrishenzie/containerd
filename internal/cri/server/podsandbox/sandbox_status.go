@@ -60,11 +60,16 @@ func (c *Controller) Status(ctx context.Context, sandboxID string, verbose bool)
 
 // toCRISandboxInfo converts internal container object information to CRI sandbox status response info map.
 func toCRISandboxInfo(ctx context.Context, sb *types.PodSandbox) (map[string]string, error) {
+	// status := sb.Status.Get()
+	// log.G(ctx).Infof("DEBUG: toCRISandboxInfo for sandbox %s, status.Resources: %+v, status.Overhead: %+v", sb.ID, status.Resources, status.Overhead)
+	// TODO: I think we don't care about this.
 	si := &critypes.SandboxInfo{
 		Pid:       sb.Status.Get().Pid,
 		Config:    sb.Metadata.Config,
 		CNIResult: sb.Metadata.CNIResult,
 		Metadata:  &sb.Metadata,
+		// Overhead:  sb.Status.Get().Overhead,
+		// Resources: sb.Status.Get().Resources,
 	}
 
 	if container := sb.Container; container != nil {
