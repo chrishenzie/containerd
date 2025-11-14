@@ -29,6 +29,7 @@ import (
 	"github.com/containerd/containerd/v2/internal/cri/setutils"
 	"github.com/containerd/containerd/v2/internal/cri/util"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 	docker "github.com/distribution/reference"
 
@@ -154,6 +155,7 @@ func (s *Store) getImage(ctx context.Context, i images.Image) (*Image, error) {
 	}
 	chainID := imageidentity.ChainID(diffIDs)
 
+	log.G(ctx).WithField("platform", s.platform).Debugf("Calculating image size with platform")
 	size, err := usage.CalculateImageUsage(ctx, i, s.provider, usage.WithManifestLimit(s.platform, 1), usage.WithManifestUsage())
 	if err != nil {
 		return nil, fmt.Errorf("get image compressed resource size: %w", err)
