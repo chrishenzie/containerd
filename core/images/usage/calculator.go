@@ -25,6 +25,7 @@ import (
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
@@ -82,6 +83,7 @@ func CalculateImageUsage(ctx context.Context, i images.Image, provider content.I
 			return 0, err
 		}
 	}
+	log.G(ctx).WithField("platform", config.platform).Debugf("Using platform to calculate image usage")
 
 	var (
 		handler   = images.ChildrenHandler(provider)
