@@ -233,6 +233,16 @@ func (c *Controller) handleUpdatedResources(ctx context.Context, podSandbox *typ
 
 	err = podSandbox.Status.Update(
 		func(status sandboxstore.Status) (sandboxstore.Status, error) {
+			if updatedRes.Overhead != nil {
+				status.Overhead = &runtime.ContainerResources{
+					Linux: updatedRes.Overhead,
+				}
+			}
+			if updatedRes.Resources != nil {
+				status.Resources = &runtime.ContainerResources{
+					Linux: updatedRes.Resources,
+				}
+			}
 			return status, nil
 		},
 	)

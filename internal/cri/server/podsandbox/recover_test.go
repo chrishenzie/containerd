@@ -254,6 +254,8 @@ func TestRecoverContainer(t *testing.T) {
 		expectedPid      uint32
 		expectedExitCode uint32
 		mockGet          func(context.Context, string) (sandbox.Sandbox, error)
+		expectedOverhead *runtime.ContainerResources
+		expectedRes      *runtime.ContainerResources
 	}{
 		// sandbox container with task status running, and wait returns exit after 100 millisecond
 		{
@@ -323,6 +325,16 @@ func TestRecoverContainer(t *testing.T) {
 						UpdatedResourcesKey: ext,
 					},
 				}, nil
+			},
+			expectedOverhead: &runtime.ContainerResources{
+				Linux: &runtime.LinuxContainerResources{
+					MemoryLimitInBytes: 1024,
+				},
+			},
+			expectedRes: &runtime.ContainerResources{
+				Linux: &runtime.LinuxContainerResources{
+					CpuPeriod: 100000,
+				},
 			},
 		},
 
@@ -494,6 +506,12 @@ func TestRecoverContainer(t *testing.T) {
 		assert.Equal(t, c.expectedState, status.State, "%s sandbox state is not expected", cont.ID())
 		if c.expectedPid > 0 {
 			assert.Equal(t, c.expectedPid, status.Pid, "%s sandbox pid is not expected", cont.ID())
+		}
+		if c.expectedOverhead != nil {
+			assert.Equal(t, c.expectedOverhead, status.Overhead, "%s overhead is not expected", cont.ID())
+		}
+		if c.expectedRes != nil {
+			assert.Equal(t, c.expectedRes, status.Resources, "%s resources is not expected", cont.ID())
 		}
 	}
 

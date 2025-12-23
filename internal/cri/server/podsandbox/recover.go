@@ -79,6 +79,16 @@ func (c *Controller) RecoverContainer(ctx context.Context, cntr containerd.Conta
 		status := sandboxstore.Status{
 			State: sandboxstore.StateUnknown,
 		}
+		if updatedRes.Resources != nil {
+			status.Resources = &runtime.ContainerResources{
+				Linux: updatedRes.Resources,
+			}
+		}
+		if updatedRes.Overhead != nil {
+			status.Overhead = &runtime.ContainerResources{
+				Linux: updatedRes.Overhead,
+			}
+		}
 		var channel <-chan containerd.ExitStatus
 
 		status.CreatedAt = info.CreatedAt
