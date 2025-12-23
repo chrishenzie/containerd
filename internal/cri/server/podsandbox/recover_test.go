@@ -27,6 +27,7 @@ import (
 	"github.com/containerd/typeurl/v2"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	"github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
@@ -214,7 +215,9 @@ func sandboxExtension(id string) map[string]typeurl.Any {
 	}
 }
 
-type mockSandboxStore struct{}
+type mockSandboxStore struct {
+	get func(context.Context, string) (sandbox.Sandbox, error)
+}
 
 func (m *mockSandboxStore) Create(ctx context.Context, sandbox sandbox.Sandbox) (sandbox.Sandbox, error) {
 	return sandbox, nil
@@ -225,7 +228,10 @@ func (m *mockSandboxStore) Update(ctx context.Context, sandbox sandbox.Sandbox, 
 }
 
 func (m *mockSandboxStore) Get(ctx context.Context, id string) (sandbox.Sandbox, error) {
-	return sandbox.Sandbox{}, nil
+	if m.get != nil {
+		return m.get(ctx, id)
+	}
+	return sandbox.Sandbox{}, errdefs.ErrNotFound
 }
 
 func (m *mockSandboxStore) List(ctx context.Context, filters ...string) ([]sandbox.Sandbox, error) {
@@ -247,6 +253,7 @@ func TestRecoverContainer(t *testing.T) {
 		expectedState    sandboxstore.State
 		expectedPid      uint32
 		expectedExitCode uint32
+		mockGet          func(context.Context, string) (sandbox.Sandbox, error)
 	}{
 		// sandbox container with task status running, and wait returns exit after 100 millisecond
 		{
@@ -273,6 +280,50 @@ func TestRecoverContainer(t *testing.T) {
 			expectedState:    sandboxstore.StateReady,
 			expectedPid:      233333,
 			expectedExitCode: 128,
+		},
+
+		// sandbox container with updated resources extension
+		{
+			container: fakeContainer{
+				c: containers.Container{
+					ID:         "sandbox_updated_resources",
+					CreatedAt:  time.Time{},
+					UpdatedAt:  time.Time{},
+					Extensions: sandboxExtension("sandbox_updated_resources"),
+				},
+				t: fakeTask{
+					id:  "sandbox_updated_resources_task",
+					pid: 233333,
+					status: containerd.Status{
+						Status:     containerd.Running,
+						ExitStatus: 128,
+						ExitTime:   time.Time{},
+					},
+					statusErr:  nil,
+					waitErr:    nil,
+					waitExitCh: make(chan struct{}),
+				},
+			},
+			expectedState:    sandboxstore.StateReady,
+			expectedPid:      233333,
+			expectedExitCode: 128,
+			mockGet: func(ctx context.Context, id string) (sandbox.Sandbox, error) {
+				updatedRes := UpdatedResources{
+					Overhead: &runtime.LinuxContainerResources{
+						MemoryLimitInBytes: 1024,
+					},
+					Resources: &runtime.LinuxContainerResources{
+						CpuPeriod: 100000,
+					},
+				}
+				ext, _ := typeurl.MarshalAny(&updatedRes)
+				return sandbox.Sandbox{
+					ID: id,
+					Extensions: map[string]typeurl.Any{
+						UpdatedResourcesKey: ext,
+					},
+				}, nil
+			},
 		},
 
 		// sandbox container with task status return error
@@ -425,6 +476,7 @@ func TestRecoverContainer(t *testing.T) {
 	}
 
 	for _, c := range containers {
+		controller.metadataStore = &mockSandboxStore{get: c.mockGet}
 		cont := c.container
 		sb, err := controller.RecoverContainer(context.Background(), &cont)
 		assert.NoError(t, err)
