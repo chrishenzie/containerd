@@ -31,9 +31,10 @@ import (
 	"github.com/containerd/containerd/api/types"
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/core/sandbox"
 	criconfig "github.com/containerd/containerd/v2/internal/cri/config"
 	crilabels "github.com/containerd/containerd/v2/internal/cri/labels"
-	"github.com/containerd/containerd/v2/internal/cri/store/sandbox"
+	sandboxstore "github.com/containerd/containerd/v2/internal/cri/store/sandbox"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/oci"
 )
@@ -203,7 +204,7 @@ func (f *fakeContainer) Restore(context.Context, cio.Creator, string) (int, erro
 }
 
 func sandboxExtension(id string) map[string]typeurl.Any {
-	metadata := sandbox.Metadata{
+	metadata := sandboxstore.Metadata{
 		ID: id,
 	}
 
@@ -213,14 +214,37 @@ func sandboxExtension(id string) map[string]typeurl.Any {
 	}
 }
 
+type mockSandboxStore struct{}
+
+func (m *mockSandboxStore) Create(ctx context.Context, sandbox sandbox.Sandbox) (sandbox.Sandbox, error) {
+	return sandbox, nil
+}
+
+func (m *mockSandboxStore) Update(ctx context.Context, sandbox sandbox.Sandbox, fieldpaths ...string) (sandbox.Sandbox, error) {
+	return sandbox, nil
+}
+
+func (m *mockSandboxStore) Get(ctx context.Context, id string) (sandbox.Sandbox, error) {
+	return sandbox.Sandbox{}, nil
+}
+
+func (m *mockSandboxStore) List(ctx context.Context, filters ...string) ([]sandbox.Sandbox, error) {
+	return nil, nil
+}
+
+func (m *mockSandboxStore) Delete(ctx context.Context, id string) error {
+	return nil
+}
+
 func TestRecoverContainer(t *testing.T) {
 	controller := &Controller{
-		config: criconfig.Config{},
-		store:  NewStore(),
+		config:        criconfig.Config{},
+		store:         NewStore(),
+		metadataStore: &mockSandboxStore{},
 	}
 	containers := []struct {
 		container        fakeContainer
-		expectedState    sandbox.State
+		expectedState    sandboxstore.State
 		expectedPid      uint32
 		expectedExitCode uint32
 	}{
@@ -246,7 +270,7 @@ func TestRecoverContainer(t *testing.T) {
 					waitExitCh: make(chan struct{}),
 				},
 			},
-			expectedState:    sandbox.StateReady,
+			expectedState:    sandboxstore.StateReady,
 			expectedPid:      233333,
 			expectedExitCode: 128,
 		},
@@ -265,7 +289,7 @@ func TestRecoverContainer(t *testing.T) {
 					statusErr: errors.New("some unknown error"),
 				},
 			},
-			expectedState: sandbox.StateUnknown,
+			expectedState: sandboxstore.StateUnknown,
 		},
 
 		// sandbox container with task status return not found
@@ -282,7 +306,7 @@ func TestRecoverContainer(t *testing.T) {
 					statusErr: errdefs.ErrNotFound,
 				},
 			},
-			expectedState: sandbox.StateNotReady,
+			expectedState: sandboxstore.StateNotReady,
 		},
 
 		// sandbox container with task not found
@@ -296,7 +320,7 @@ func TestRecoverContainer(t *testing.T) {
 				},
 				taskErr: errdefs.ErrNotFound,
 			},
-			expectedState: sandbox.StateNotReady,
+			expectedState: sandboxstore.StateNotReady,
 		},
 
 		// sandbox container with error when call Task()
@@ -310,7 +334,7 @@ func TestRecoverContainer(t *testing.T) {
 				},
 				taskErr: errors.New("some unknown error"),
 			},
-			expectedState: sandbox.StateUnknown,
+			expectedState: sandboxstore.StateUnknown,
 		},
 
 		// sandbox container with task wait error
@@ -331,7 +355,7 @@ func TestRecoverContainer(t *testing.T) {
 					waitErr: errors.New("some unknown error"),
 				},
 			},
-			expectedState: sandbox.StateUnknown,
+			expectedState: sandboxstore.StateUnknown,
 		},
 
 		// sandbox container with task wait not found
@@ -352,7 +376,7 @@ func TestRecoverContainer(t *testing.T) {
 					waitErr: errdefs.ErrNotFound,
 				},
 			},
-			expectedState: sandbox.StateNotReady,
+			expectedState: sandboxstore.StateNotReady,
 		},
 
 		// sandbox container with task delete error
@@ -374,7 +398,7 @@ func TestRecoverContainer(t *testing.T) {
 					deleteErr: errors.New("some unknown error"),
 				},
 			},
-			expectedState: sandbox.StateUnknown,
+			expectedState: sandboxstore.StateUnknown,
 		},
 
 		// sandbox container with task delete not found
@@ -396,7 +420,7 @@ func TestRecoverContainer(t *testing.T) {
 					deleteErr: errdefs.ErrNotFound,
 				},
 			},
-			expectedState: sandbox.StateNotReady,
+			expectedState: sandboxstore.StateNotReady,
 		},
 	}
 

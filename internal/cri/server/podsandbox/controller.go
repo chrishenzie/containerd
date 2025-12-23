@@ -95,6 +95,7 @@ func init() {
 				imageService:   criImagePlugin.(ImageService),
 				warningService: warningPlugin.(warning.Service),
 				store:          NewStore(),
+				metadataStore:  client.SandboxStore(),
 			}
 
 			// There is no need to subscribe to the exit event for the pause container,
@@ -143,7 +144,8 @@ type Controller struct {
 	// actually we only use it's backoff mechanism to make sure pause container is cleaned up.
 	eventMonitor *events.EventMonitor
 
-	store *Store
+	store         *Store
+	metadataStore sandbox.Store
 }
 
 var _ sandbox.Controller = (*Controller)(nil)
