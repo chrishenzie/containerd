@@ -48,6 +48,10 @@ func (c *CRIImageService) ImageStatus(ctx context.Context, r *runtime.ImageStatu
 	// doesn't exist?
 
 	runtimeImage := toCRIImage(image)
+	if runtimeImage == nil {
+		// Resolved by id but has no canonical references; treat as not found.
+		return &runtime.ImageStatusResponse{}, nil
+	}
 	info, err := c.toCRIImageInfo(ctx, &image, r.GetVerbose())
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate image info: %w", err)
@@ -60,8 +64,13 @@ func (c *CRIImageService) ImageStatus(ctx context.Context, r *runtime.ImageStatu
 }
 
 // toCRIImage converts internal image object to CRI runtime.Image.
+// It returns nil when the image has no canonical references, since such an
+// image is not addressable through CRI.
 func toCRIImage(image imagestore.Image) *runtime.Image {
 	repoTags, repoDigests := util.ParseImageReferences(image.References)
+	if len(repoTags) == 0 && len(repoDigests) == 0 {
+		return nil
+	}
 	runtimeImage := &runtime.Image{
 		Id:          image.ID,
 		RepoTags:    repoTags,
