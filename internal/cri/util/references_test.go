@@ -29,11 +29,19 @@ func TestParseImageReferences(t *testing.T) {
 	refs := []string{
 		"gcr.io/library/busybox@sha256:e6693c20186f837fc393390135d8a598a96a833917917789d63766cab6c59582",
 		"gcr.io/library/busybox:1.2",
+		"registry-1.docker.io/library/busybox:1.36",
 		"sha256:e6693c20186f837fc393390135d8a598a96a833917917789d63766cab6c59582",
 		"arbitrary-ref",
+		"busybox:fixed",
+		"docker.io/busybox:1.36",
+		"index.docker.io/library/busybox:1.36",
+		"library/docker.io",
+		"library/docker.io:v1",
+		"busybox:docker.io",
 	}
 	expectedTags := []string{
 		"gcr.io/library/busybox:1.2",
+		"registry-1.docker.io/library/busybox:1.36",
 	}
 	expectedDigests := []string{"gcr.io/library/busybox@sha256:e6693c20186f837fc393390135d8a598a96a833917917789d63766cab6c59582"}
 	tags, digests := ParseImageReferences(refs)

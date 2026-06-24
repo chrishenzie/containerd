@@ -22,18 +22,24 @@ import (
 )
 
 // ParseImageReferences parses a list of arbitrary image references and returns
-// the repotags and repodigests
+// the repotags and repodigests. It surfaces only canonical references.
+//
+// The CRI image store keys images by their raw containerd name but displays the
+// normalized form. A non-canonical name such as "busybox:fixed" would be shown
+// as "docker.io/library/busybox:fixed" yet resolve to nothing, because lookups
+// normalize the request before consulting the raw-keyed cache. reference.ParseNamed
+// rejects any non-canonical input, so the surfaced set equals the resolvable set.
 func ParseImageReferences(refs []string) ([]string, []string) {
 	var tags, digests []string
 	for _, ref := range refs {
-		parsed, err := reference.ParseAnyReference(ref)
+		named, err := reference.ParseNamed(ref)
 		if err != nil {
 			continue
 		}
-		if _, ok := parsed.(reference.Canonical); ok {
-			digests = append(digests, parsed.String())
-		} else if _, ok := parsed.(reference.Tagged); ok {
-			tags = append(tags, parsed.String())
+		if _, ok := named.(reference.Canonical); ok {
+			digests = append(digests, named.String())
+		} else if _, ok := named.(reference.Tagged); ok {
+			tags = append(tags, named.String())
 		}
 	}
 	return tags, digests
