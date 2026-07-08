@@ -27,6 +27,7 @@ import (
 	coreimages "github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/integration/images"
 	"github.com/containerd/errdefs"
+	"github.com/distribution/reference"
 	"github.com/stretchr/testify/require"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
@@ -37,29 +38,44 @@ func TestImageTagWithoutRegistryNotVisibleInCRI(t *testing.T) {
 	t.Logf("Pulling base image %s", baseImage)
 	img, err := containerdClient.Pull(t.Context(), baseImage)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := containerdClient.ImageService().Delete(context.Background(), baseImage)
+		if err != nil && !errdefs.IsNotFound(err) {
+			require.NoError(t, err)
+		}
+	})
+	t.Cleanup(func() {
+		err := imageService.RemoveImage(&runtime.ImageSpec{Image: baseImage})
+		if err != nil && !errdefs.IsNotFound(err) {
+			require.NoError(t, err)
+		}
+	})
 
 	t.Run("ShortTag_Hidden", func(t *testing.T) {
 		shortTag := fmt.Sprintf("busybox:hidden-%s", strings.ReplaceAll(t.Name(), "/", "-"))
+		normalizedShortTag, err := reference.ParseDockerRef(shortTag)
+		require.NoError(t, err)
+
 		t.Logf("Tagging as short tag %s", shortTag)
 		createTag(t, t.Context(), img, shortTag)
 
-		t.Logf("Verifying short tag stays hidden in CRI Status")
+		t.Logf("Verifying normalized short tag stays hidden in CRI Status")
 		require.NoError(t, Consistently(func() (bool, error) {
-			criImage, err := imageService.ImageStatus(&runtime.ImageSpec{Image: shortTag})
+			criImage, err := imageService.ImageStatus(&runtime.ImageSpec{Image: normalizedShortTag.String()})
 			if err != nil {
 				return false, err
 			}
 			return criImage == nil, nil
-		}, 100*time.Millisecond, time.Second), "Short tag should not become visible in CRI Status")
+		}, 100*time.Millisecond, time.Second), "Normalized short tag should not become visible in CRI Status")
 
-		t.Logf("Verifying short tag stays hidden in CRI ListImages")
+		t.Logf("Verifying normalized short tag stays hidden in CRI ListImages")
 		require.NoError(t, Consistently(func() (bool, error) {
 			criImages, err := imageService.ListImages(nil)
 			if err != nil {
 				return false, err
 			}
-			return !containsTag(criImages, shortTag), nil
-		}, 100*time.Millisecond, time.Second), "Short tag should not be listed in CRI ListImages")
+			return !containsTag(criImages, normalizedShortTag.String()), nil
+		}, 100*time.Millisecond, time.Second), "Normalized short tag should not be listed in CRI ListImages")
 	})
 
 	t.Run("FullTag_Visible", func(t *testing.T) {

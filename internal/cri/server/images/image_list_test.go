@@ -73,6 +73,14 @@ func TestListImages(t *testing.T) {
 				},
 			},
 		},
+		{
+			ID:      "sha256:4123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			ChainID: "test-chainid-4",
+			References: []string{
+				"busybox:hidden",
+				"docker.io/busybox:1.36",
+			},
+		},
 	}
 	expect := []*runtime.Image{
 		{

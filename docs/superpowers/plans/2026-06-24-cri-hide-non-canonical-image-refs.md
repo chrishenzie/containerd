@@ -12,9 +12,10 @@ resolvable through CRI) from the CRI image service's `ImageStatus`,
 **Architecture:** Filter at the read-surface path. `util.ParseImageReferences`
 keeps a reference only when `reference.ParseNamed` accepts it as canonical —
 provably the same set CRI can resolve, because the store keys images by their
-raw name but displays the normalized form. `toCRIImage` returns `nil` when an
-image has no qualified references; `ListImages` skips those and `ImageStatus`
-returns an empty response.
+raw name but displays the normalized form. The image store preserves raw
+references when merging them, `toCRIImage` reports only qualified references,
+and `ListImages` skips images with no qualified references, while `ImageStatus`
+by image ID can still return an image with empty RepoTags and RepoDigests.
 
 **Tech Stack:** Go, `github.com/distribution/reference`, CRI (`k8s.io/cri-api`),
 containerd integration test harness.
@@ -162,91 +163,147 @@ Assisted-by: Claude Code"
 
 ### Task 2: Hide images with no qualified references from CRI
 
+**Correction from validation:** do not make `toCRIImage` return `nil`.
+`TestContainerdImage` requires `ImageStatus` by image ID to keep working after
+the tag is deleted and the only remaining reference is the raw image ID.
+`ListImages` owns the empty-reference visibility filter.
+
+**Correction from integration testing:** do not sort merged image references
+with `reference.Sort`. That parser-based sort normalizes raw short names before
+the CRI read-surface filter sees them.
+
 **Files:**
 
+- Modify: `internal/cri/store/image/image.go`
+- Test: `internal/cri/store/image/image_test.go`
 - Modify: `internal/cri/server/images/image_status.go:50-79`
 - Modify: `internal/cri/server/images/image_list.go:33-37`
 - Test: `internal/cri/server/images/image_status_test.go`
+- Test: `internal/cri/server/images/image_list_test.go`
 
 **Interfaces:**
 
 - Consumes: `util.ParseImageReferences` (Task 1); `imagestore.Image`;
   `imagestore.NewFakeStore([]imagestore.Image) (*Store, error)`.
-- Produces: `toCRIImage(imagestore.Image) *runtime.Image` — now returns `nil`
-  when the image has no canonical references. Callers must nil-check.
+- Produces: `toCRIImage(imagestore.Image) *runtime.Image` — unchanged
+  non-nil return; RepoTags and RepoDigests contain only canonical references.
 
-- [ ] **Step 1: Write the failing unit test for `toCRIImage`**
+- [ ] **Step 0: Preserve raw references when merging image-store refs**
+
+Add a failing unit test to `internal/cri/store/image/image_test.go`:
+
+```go
+func TestInternalStorePreservesRawReferences(t *testing.T) {
+	assert := assertlib.New(t)
+	s := &store{
+		images:     make(map[string]Image),
+		digestSet:  digestset.NewSet(),
+		pinnedRefs: make(map[string]sets.Set[string]),
+	}
+
+	id := "sha256:1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	assert.NoError(s.add(Image{
+		ID:         id,
+		References: []string{"docker.io/library/busybox:latest"},
+	}))
+	assert.NoError(s.add(Image{
+		ID:         id,
+		References: []string{"busybox:hidden"},
+	}))
+
+	got, err := s.get(id)
+	assert.NoError(err)
+	assert.Contains(got.References, "busybox:hidden")
+	assert.NotContains(got.References, "docker.io/library/busybox:hidden")
+}
+```
+
+Run:
+`go test ./internal/cri/store/image/ -run TestInternalStorePreservesRawReferences -v`
+Expected: FAIL before the fix, because `reference.Sort` rewrites
+`busybox:hidden` to `docker.io/library/busybox:hidden`.
+
+In `internal/cri/store/image/image.go`, replace the parser-based sort with a
+plain string sort:
+
+```go
+i.References = util.MergeStringSlices(i.References, img.References)
+sort.Strings(i.References)
+```
+
+- [ ] **Step 1: Write the failing unit test for `ImageStatus` by image ID**
 
 Add this function to `internal/cri/server/images/image_status_test.go` (after
 `TestImageStatus`):
 
 ```go
-func TestToCRIImageHidesNonCanonicalOnly(t *testing.T) {
-	t.Logf("image whose only references are non-canonical is hidden")
+func TestImageStatusReturnsImageResolvedByIDWithoutCanonicalReferences(t *testing.T) {
+	testID := "sha256:d848ce12891bf78792cda4a23c58984033b0c397a55e93a1556202222ecc5ed4" // #nosec G101
+	image := imagestore.Image{
+		ID:         testID,
+		References: []string{testID},
+	}
+
+	c, g := newTestCRIService()
+	var err error
+	c.imageStore, err = imagestore.NewFakeStore([]imagestore.Image{image})
+	require.NoError(t, err)
+
+	resp, err := g.ImageStatus(context.Background(), &runtime.ImageStatusRequest{
+		Image: &runtime.ImageSpec{Image: testID},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.GetImage())
+	assert.Equal(t, testID, resp.GetImage().Id)
+	assert.Empty(t, resp.GetImage().RepoTags)
+	assert.Empty(t, resp.GetImage().RepoDigests)
+}
+```
+
+- [ ] **Step 2: Update the `toCRIImage` unit test**
+
+Add or update this test in `internal/cri/server/images/image_status_test.go`:
+
+```go
+func TestToCRIImageFiltersNonCanonicalReferences(t *testing.T) {
+	t.Logf("image whose only references are non-canonical has no CRI references")
 	hidden := imagestore.Image{
 		ID:         "sha256:d848ce12891bf78792cda4a23c58984033b0c397a55e93a1556202222ecc5ed4", // #nosec G101
 		References: []string{"busybox:fixed", "docker.io/busybox:1.36"},
 	}
-	assert.Nil(t, toCRIImage(hidden))
+	got := toCRIImage(hidden)
+	require.NotNil(t, got)
+	assert.Empty(t, got.RepoTags)
+	assert.Empty(t, got.RepoDigests)
 
 	t.Logf("image with a canonical reference is surfaced")
 	visible := imagestore.Image{
 		ID:         "sha256:d848ce12891bf78792cda4a23c58984033b0c397a55e93a1556202222ecc5ed4", // #nosec G101
 		References: []string{"busybox:fixed", "gcr.io/library/busybox:1.2"},
 	}
-	got := toCRIImage(visible)
+	got = toCRIImage(visible)
 	require.NotNil(t, got)
 	assert.Equal(t, []string{"gcr.io/library/busybox:1.2"}, got.RepoTags)
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 3: Run the focused tests to verify they fail**
 
 Run:
-`go test ./internal/cri/server/images/ -run TestToCRIImageHidesNonCanonicalOnly -v`
-Expected: FAIL — `toCRIImage` currently always returns a non-nil
-`*runtime.Image`, so the `assert.Nil` fails.
+`go test ./internal/cri/server/images/ -run 'TestToCRIImageFiltersNonCanonicalReferences|TestImageStatusReturnsImageResolvedByIDWithoutCanonicalReferences|TestListImages' -v`
+Expected: FAIL until `ListImages` owns the empty-reference visibility filter.
+Against the original Task 2 implementation, the `ImageStatus` by image ID test
+also fails because `toCRIImage` returns `nil` when no canonical references
+exist.
 
-- [ ] **Step 3: Make `toCRIImage` return nil for images with no qualified
-      references**
+- [ ] **Step 4: Keep `toCRIImage` non-nil and keep `ImageStatus` unchanged**
 
-In `internal/cri/server/images/image_status.go`, change the start of
-`toCRIImage` (currently lines 62-65):
+`toCRIImage` should always return a `*runtime.Image`. Its RepoTags and
+RepoDigests come from `util.ParseImageReferences`, so non-canonical references
+are still filtered. `ImageStatus` by image ID can then return an image whose
+RepoTags and RepoDigests are empty.
 
-```go
-// toCRIImage converts internal image object to CRI runtime.Image.
-// It returns nil when the image has no canonical references, since such an
-// image is not addressable through CRI.
-func toCRIImage(image imagestore.Image) *runtime.Image {
-	repoTags, repoDigests := util.ParseImageReferences(image.References)
-	if len(repoTags) == 0 && len(repoDigests) == 0 {
-		return nil
-	}
-	runtimeImage := &runtime.Image{
-```
-
-- [ ] **Step 4: Nil-check the result in `ImageStatus`**
-
-In `internal/cri/server/images/image_status.go`, change the `ImageStatus` body
-(currently lines 50-51) from:
-
-```go
-	runtimeImage := toCRIImage(image)
-	info, err := c.toCRIImageInfo(ctx, &image, r.GetVerbose())
-```
-
-to:
-
-```go
-	runtimeImage := toCRIImage(image)
-	if runtimeImage == nil {
-		// Resolved by id but has no canonical references; treat as not found.
-		return &runtime.ImageStatusResponse{}, nil
-	}
-	info, err := c.toCRIImageInfo(ctx, &image, r.GetVerbose())
-```
-
-- [ ] **Step 5: Skip nil images in `ListImages`**
+- [ ] **Step 5: Skip images with no qualified references in `ListImages`**
 
 In `internal/cri/server/images/image_list.go`, change the loop body (currently
 lines 33-37) from:
@@ -265,7 +322,8 @@ to:
 	for _, image := range imagesInStore {
 		// TODO(random-liu): [P0] Make sure corresponding snapshot exists. What if snapshot
 		// doesn't exist?
-		if criImage := toCRIImage(image); criImage != nil {
+		criImage := toCRIImage(image)
+		if len(criImage.RepoTags) != 0 || len(criImage.RepoDigests) != 0 {
 			images = append(images, criImage)
 		}
 	}
@@ -285,16 +343,19 @@ Expected: builds clean, no vet diagnostics.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add internal/cri/server/images/image_status.go internal/cri/server/images/image_list.go internal/cri/server/images/image_status_test.go
+git add internal/cri/store/image/image.go internal/cri/store/image/image_test.go internal/cri/server/images/image_status.go internal/cri/server/images/image_list.go internal/cri/server/images/image_status_test.go internal/cri/server/images/image_list_test.go
 git diff --check
 git commit -s -m "Hide images with no canonical refs from CRI
 
-toCRIImage now returns nil when an image has no canonical references, so
-ListImages skips it and ImageStatus reports it as not found. This stops
-non-resolvable references (e.g. a short \"ctr tag\") from appearing in
-crictl while being unusable.
+The CRI image store now preserves raw references when merging refs for
+one image ID, so non-canonical names are still filterable at the CRI
+read surface.
 
-Tested: go test ./internal/cri/server/images/...
+CRI image conversion now drops non-canonical RepoTags and RepoDigests.
+ListImages skips images left with no qualified references, while
+ImageStatus by image ID still returns the image with empty refs.
+
+Tested: go test ./internal/cri/store/image/... ./internal/cri/server/images/...
 
 Assisted-by: Claude Code"
 ```
@@ -351,6 +412,7 @@ import (
 	coreimages "github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/integration/images"
 	"github.com/containerd/errdefs"
+	"github.com/distribution/reference"
 	"github.com/stretchr/testify/require"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
@@ -361,29 +423,44 @@ func TestImageTagWithoutRegistryNotVisibleInCRI(t *testing.T) {
 	t.Logf("Pulling base image %s", baseImage)
 	img, err := containerdClient.Pull(t.Context(), baseImage)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := containerdClient.ImageService().Delete(context.Background(), baseImage)
+		if err != nil && !errdefs.IsNotFound(err) {
+			require.NoError(t, err)
+		}
+	})
+	t.Cleanup(func() {
+		err := imageService.RemoveImage(&runtime.ImageSpec{Image: baseImage})
+		if err != nil && !errdefs.IsNotFound(err) {
+			require.NoError(t, err)
+		}
+	})
 
 	t.Run("ShortTag_Hidden", func(t *testing.T) {
 		shortTag := fmt.Sprintf("busybox:hidden-%s", strings.ReplaceAll(t.Name(), "/", "-"))
+		normalizedShortTag, err := reference.ParseDockerRef(shortTag)
+		require.NoError(t, err)
+
 		t.Logf("Tagging as short tag %s", shortTag)
 		createTag(t, t.Context(), img, shortTag)
 
-		t.Logf("Verifying short tag stays hidden in CRI Status")
+		t.Logf("Verifying normalized short tag stays hidden in CRI Status")
 		require.NoError(t, Consistently(func() (bool, error) {
-			criImage, err := imageService.ImageStatus(&runtime.ImageSpec{Image: shortTag})
+			criImage, err := imageService.ImageStatus(&runtime.ImageSpec{Image: normalizedShortTag.String()})
 			if err != nil {
 				return false, err
 			}
 			return criImage == nil, nil
-		}, 100*time.Millisecond, time.Second), "Short tag should not become visible in CRI Status")
+		}, 100*time.Millisecond, time.Second), "Normalized short tag should not become visible in CRI Status")
 
-		t.Logf("Verifying short tag stays hidden in CRI ListImages")
+		t.Logf("Verifying normalized short tag stays hidden in CRI ListImages")
 		require.NoError(t, Consistently(func() (bool, error) {
 			criImages, err := imageService.ListImages(nil)
 			if err != nil {
 				return false, err
 			}
-			return !containsTag(criImages, shortTag), nil
-		}, 100*time.Millisecond, time.Second), "Short tag should not be listed in CRI ListImages")
+			return !containsTag(criImages, normalizedShortTag.String()), nil
+		}, 100*time.Millisecond, time.Second), "Normalized short tag should not be listed in CRI ListImages")
 	})
 
 	t.Run("FullTag_Visible", func(t *testing.T) {

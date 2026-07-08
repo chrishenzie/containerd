@@ -139,6 +139,30 @@ func TestInternalStore(t *testing.T) {
 	}
 }
 
+func TestInternalStorePreservesRawReferences(t *testing.T) {
+	assert := assertlib.New(t)
+	s := &store{
+		images:     make(map[string]Image),
+		digestSet:  digestset.NewSet(),
+		pinnedRefs: make(map[string]sets.Set[string]),
+	}
+
+	id := "sha256:1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	assert.NoError(s.add(Image{
+		ID:         id,
+		References: []string{"docker.io/library/busybox:latest"},
+	}))
+	assert.NoError(s.add(Image{
+		ID:         id,
+		References: []string{"busybox:hidden"},
+	}))
+
+	got, err := s.get(id)
+	assert.NoError(err)
+	assert.Contains(got.References, "busybox:hidden")
+	assert.NotContains(got.References, "docker.io/library/busybox:hidden")
+}
+
 func TestInternalStorePinnedImage(t *testing.T) {
 	assert := assertlib.New(t)
 	s := &store{

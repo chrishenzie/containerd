@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/containerd/containerd/v2/core/content"
@@ -29,7 +30,6 @@ import (
 	"github.com/containerd/containerd/v2/internal/cri/util"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
-	docker "github.com/distribution/reference"
 
 	imagedigest "github.com/opencontainers/go-digest"
 	"github.com/opencontainers/go-digest/digestset"
@@ -254,8 +254,11 @@ func (s *store) add(img Image) error {
 		s.images[img.ID] = img
 		return nil
 	}
-	// Or else, merge and sort the references.
-	i.References = docker.Sort(util.MergeStringSlices(i.References, img.References))
+	// Merge and sort without reparsing references. Do not use the docker reference
+	// package's sort helper here, because it normalizes short names, making them
+	// look canonical before CRI can hide them from ListImages and name lookups.
+	i.References = util.MergeStringSlices(i.References, img.References)
+	sort.Strings(i.References)
 	i.Pinned = i.Pinned || img.Pinned
 	s.images[img.ID] = i
 	return nil

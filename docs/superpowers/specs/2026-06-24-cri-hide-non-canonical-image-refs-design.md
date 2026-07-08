@@ -31,6 +31,11 @@ Every CRI operation resolves through `LocalResolve`, which normalizes its input
 the displayed name searches for `docker.io/library/busybox:fixed` while the
 cache holds `busybox:fixed`. The reference is displayed but unresolvable.
 
+The image store must also preserve raw names when merging references. Sorting
+merged references with `reference.Sort` reparses and reserializes each ref,
+which turns `busybox:fixed` into `docker.io/library/busybox:fixed` before
+`ParseImageReferences` can filter it.
+
 A reference is therefore operable through CRI **iff its raw stored name already
 equals its normalized form** — i.e. iff it is canonical. For the tag-only and
 digest-only names that pull and tag flows actually produce, this is exact:
@@ -73,21 +78,23 @@ And keeps everything operable: `docker.io/library/busybox:1.36`,
 
 ## Changes
 
-All changes are on the read-surface path; the store stays a faithful mirror of
-containerd, and an image remains resolvable by ID internally.
+The store stays a faithful mirror of containerd's raw references, and an image
+remains resolvable by ID internally.
 
 1. **`internal/cri/util/references.go`** — replace the `ParseAnyReference` body
    of `ParseImageReferences` with `reference.ParseNamed`; bucket the result by
    `reference.Canonical` / `reference.Tagged` as today. Non-canonical refs are
    skipped. Document the operability rationale.
 
-2. **`internal/cri/server/images/image_status.go`** — `toCRIImage` returns `nil`
-   when an image yields no qualified references (no RepoTags and no
-   RepoDigests). `ImageStatus` returns an empty `ImageStatusResponse` in that
-   case.
+2. **`internal/cri/store/image/image.go`** — merge image references without
+   parsing them, so raw non-canonical names stay raw in the in-memory store.
 
-3. **`internal/cri/server/images/image_list.go`** — `ListImages` skips images
-   for which `toCRIImage` returns `nil`.
+3. **`internal/cri/server/images/image_status.go`** — `toCRIImage` reports only
+   qualified references (RepoTags and RepoDigests), but still returns the image
+   object so `ImageStatus` by image ID continues to work.
+
+4. **`internal/cri/server/images/image_list.go`** — `ListImages` skips images
+   whose CRI form has no qualified references.
 
 `util.ParseImageReferences` has one other caller, `server/container_status.go`,
 which builds a running container's RepoTags/RepoDigests. Applying the same
@@ -103,18 +110,23 @@ references CRI acknowledges."
   and the kept set (`gcr.io/library/busybox:1.2`, a canonical digest,
   `registry-1.docker.io/library/busybox:1.36`).
 
+- **Unit — `internal/cri/store/image/image_test.go`.** Assert that merging a
+  short tag into an existing image preserves the raw short reference instead of
+  normalizing it.
+
 - **Integration — `integration/images_visibility_test.go`** (new,
-  `TestImageTagWithoutRegistryNotVisibleInCRI`). Short tag hidden from
-  `ImageStatus` and `ListImages`; full tag visible with correct RepoTags. Per
-  the PR review, the two hidden-tag assertions use `Consistently` (the CRI image
-  store updates asynchronously, so a point-in-time check could miss a later
-  exposure).
+  `TestImageTagWithoutRegistryNotVisibleInCRI`). The normalized form of a short
+  tag is hidden from `ImageStatus` and `ListImages`; full tag visible with
+  correct RepoTags. Per the PR review, the two hidden-tag assertions use
+  `Consistently` (the CRI image store updates asynchronously, so a point-in-time
+  check could miss a later exposure).
 
 - **Regression — must keep passing:**
   - `FOCUS=TestImageTagWithoutRegistryNotVisibleInCRI make cri-integration`
   - `FOCUS=TestContainerdImage make cri-integration` — its image is
     `ghcr.io/containerd/busybox:1.36` (canonical), so it stays visible and its
-    `RepoTags == [testImage]` assertion holds.
+    `RepoTags == [testImage]` assertion holds; after the tag is deleted,
+    `ImageStatus` by image ID still returns the image with no RepoTags.
 
 ## Out of scope
 
@@ -122,8 +134,8 @@ references CRI acknowledges."
   surfacing).
 - Removing the `refCache` / second source of truth (noted as future work in PR
   #11920).
-- Resolving a hidden image by its image ID still works; that is internal and not
-  user-facing through `crictl images`.
+- Resolving a hidden image by its image ID still works through `ImageStatus`.
+  `ListImages` still hides images that have no qualified references.
 - A name carrying both a tag and a digest is an unusual containerd image-name
   form that pull and tag flows do not produce; its handling is unchanged from
   today and not specially addressed.

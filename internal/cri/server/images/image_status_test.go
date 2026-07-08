@@ -73,22 +73,47 @@ func TestImageStatus(t *testing.T) {
 	assert.Equal(t, expected, resp.GetImage())
 }
 
-func TestToCRIImageHidesNonCanonicalOnly(t *testing.T) {
-	t.Logf("image whose only references are non-canonical is hidden")
+func TestToCRIImageFiltersNonCanonicalReferences(t *testing.T) {
+	t.Logf("image whose only references are non-canonical has no CRI references")
 	hidden := imagestore.Image{
 		ID:         "sha256:d848ce12891bf78792cda4a23c58984033b0c397a55e93a1556202222ecc5ed4", // #nosec G101
 		References: []string{"busybox:fixed", "docker.io/busybox:1.36"},
 	}
-	assert.Nil(t, toCRIImage(hidden))
+	got := toCRIImage(hidden)
+	require.NotNil(t, got)
+	assert.Empty(t, got.RepoTags)
+	assert.Empty(t, got.RepoDigests)
 
 	t.Logf("image with a canonical reference is surfaced")
 	visible := imagestore.Image{
 		ID:         "sha256:d848ce12891bf78792cda4a23c58984033b0c397a55e93a1556202222ecc5ed4", // #nosec G101
 		References: []string{"busybox:fixed", "gcr.io/library/busybox:1.2"},
 	}
-	got := toCRIImage(visible)
+	got = toCRIImage(visible)
 	require.NotNil(t, got)
 	assert.Equal(t, []string{"gcr.io/library/busybox:1.2"}, got.RepoTags)
+}
+
+func TestImageStatusReturnsImageResolvedByIDWithoutCanonicalReferences(t *testing.T) {
+	testID := "sha256:d848ce12891bf78792cda4a23c58984033b0c397a55e93a1556202222ecc5ed4" // #nosec G101
+	image := imagestore.Image{
+		ID:         testID,
+		References: []string{testID},
+	}
+
+	c, g := newTestCRIService()
+	var err error
+	c.imageStore, err = imagestore.NewFakeStore([]imagestore.Image{image})
+	require.NoError(t, err)
+
+	resp, err := g.ImageStatus(context.Background(), &runtime.ImageStatusRequest{
+		Image: &runtime.ImageSpec{Image: testID},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.GetImage())
+	assert.Equal(t, testID, resp.GetImage().Id)
+	assert.Empty(t, resp.GetImage().RepoTags)
+	assert.Empty(t, resp.GetImage().RepoDigests)
 }
 
 // TestGetUserFromImage tests the logic of getting image uid or user name of image user.

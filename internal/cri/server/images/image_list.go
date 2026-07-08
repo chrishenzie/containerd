@@ -33,7 +33,8 @@ func (c *GRPCCRIImageService) ListImages(ctx context.Context, r *runtime.ListIma
 	for _, image := range imagesInStore {
 		// TODO(random-liu): [P0] Make sure corresponding snapshot exists. What if snapshot
 		// doesn't exist?
-		if criImage := toCRIImage(image); criImage != nil {
+		criImage := toCRIImage(image)
+		if len(criImage.RepoTags) != 0 || len(criImage.RepoDigests) != 0 {
 			images = append(images, criImage)
 		}
 	}
