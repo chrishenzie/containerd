@@ -397,6 +397,98 @@ disabled_plugins=["cri"]
 	assert.Equal(t, []string{"io.containerd.grpc.v1.cri"}, out.DisabledPlugins)
 }
 
+func TestLoadConfigImportResolution(t *testing.T) {
+	ctx := context.Background()
+
+	// Each drop-in disables a distinct plugin so the assertions can tell
+	// which drop-ins were actually loaded, not just recorded in Imports.
+	const (
+		defaultDropin = "version = 2\ndisabled_plugins = [\"io.containerd.test.v1.default\"]\n"
+		customDropin  = "version = 2\ndisabled_plugins = [\"io.containerd.test.v1.custom\"]\n"
+	)
+
+	// DEFAULT_GLOB is expanded to a path under the test's temporary
+	// directory. Custom imports stay relative to the root config.
+	tests := []struct {
+		name                string
+		rootTOML            string
+		defaultDropinTOML   string // written to default.d/default.toml when non-empty
+		customDropinTOML    string // written to custom.d/custom.toml when non-empty
+		wantImports         []string
+		wantDisabledPlugins []string
+	}{
+		{
+			name:              "root omitted imports keeps default in memory without loading dropins",
+			rootTOML:          "version = 2\n",
+			defaultDropinTOML: defaultDropin,
+			wantImports:       []string{"DEFAULT_GLOB"},
+		},
+		{
+			name:              "root empty imports keeps default in memory",
+			rootTOML:          "version = 2\nimports = []\n",
+			defaultDropinTOML: defaultDropin,
+			wantImports:       []string{"DEFAULT_GLOB"},
+		},
+		{
+			name:                "root custom imports appends to default in memory",
+			rootTOML:            "version = 2\nimports = [\"custom.d/*.toml\"]\n",
+			defaultDropinTOML:   defaultDropin,
+			customDropinTOML:    customDropin,
+			wantImports:         []string{"DEFAULT_GLOB", "custom.d/*.toml"},
+			wantDisabledPlugins: []string{"io.containerd.test.v1.custom"},
+		},
+		{
+			name:                "dropin omitted imports does not recursively fall back to default",
+			rootTOML:            "version = 2\nimports = [\"custom.d/custom.toml\"]\n",
+			defaultDropinTOML:   defaultDropin,
+			customDropinTOML:    customDropin, // has no imports line
+			wantImports:         []string{"DEFAULT_GLOB", "custom.d/custom.toml"},
+			wantDisabledPlugins: []string{"io.containerd.test.v1.custom"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			defaultDir := filepath.Join(tempDir, "default.d")
+			customDir := filepath.Join(tempDir, "custom.d")
+			require.NoError(t, os.MkdirAll(defaultDir, 0o700))
+			require.NoError(t, os.MkdirAll(customDir, 0o700))
+
+			defaultGlob := filepath.Join(defaultDir, "*.toml")
+			customFile := filepath.Join(customDir, "custom.toml")
+
+			expand := func(s string) string {
+				return strings.ReplaceAll(s, "DEFAULT_GLOB", defaultGlob)
+			}
+
+			if tc.defaultDropinTOML != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(defaultDir, "default.toml"), []byte(tc.defaultDropinTOML), 0o600))
+			}
+			if tc.customDropinTOML != "" {
+				require.NoError(t, os.WriteFile(customFile, []byte(tc.customDropinTOML), 0o600))
+			}
+
+			rootPath := filepath.Join(tempDir, "config.toml")
+			require.NoError(t, os.WriteFile(rootPath, []byte(expand(tc.rootTOML)), 0o600))
+
+			// Mirror the daemon, which pre-populates Imports with the
+			// default drop-in glob before loading the config file.
+			var out Config
+			out.Imports = []string{defaultGlob}
+
+			require.NoError(t, LoadConfig(ctx, rootPath, &out))
+
+			wantImports := make([]string, len(tc.wantImports))
+			for i, imp := range tc.wantImports {
+				wantImports[i] = expand(imp)
+			}
+			assert.Equal(t, wantImports, out.Imports)
+			assert.Equal(t, tc.wantDisabledPlugins, out.DisabledPlugins)
+		})
+	}
+}
+
 func TestDecodePlugin(t *testing.T) {
 	ctx := logtest.WithT(context.Background(), t)
 	data := `
