@@ -17,9 +17,10 @@
 // config is the global configuration for containerd
 //
 // Version History
-// 1: Deprecated and removed in containerd 2.0
+// 1: Original configuration format; the version header is optional
 // 2: Uses fully qualified plugin names
 // 3: Added support for migration and warning on unknown fields
+// 4: Moved server settings into plugins
 package config
 
 import (
@@ -33,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -121,7 +123,7 @@ type StreamProcessor struct {
 	Env []string `toml:"env"`
 }
 
-// ValidateVersion validates the config for a v2 file
+// ValidateVersion validates the config version and plugin IDs.
 func (c *Config) ValidateVersion() error {
 	if c.Version > version.ConfigVersion {
 		return fmt.Errorf("expected containerd config version equal to or less than `%d`, got `%d`", version.ConfigVersion, c.Version)
@@ -160,7 +162,7 @@ func (c *Config) MigrateConfigTo(ctx context.Context, targetVersion int) error {
 }
 
 func v1MigratePluginName(ctx context.Context, plugin string) string {
-	// corePlugins is the list of used plugins before v1 was deprecated
+	// corePlugins maps v1 short plugin names to their fully qualified IDs.
 	corePlugins := map[string]string{
 		"cri":       "io.containerd.grpc.v1.cri",
 		"cgroups":   "io.containerd.monitor.v1.cgroups",
@@ -448,6 +450,10 @@ type PluginFunc func() iter.Seq[plugin.Registration]
 
 // LoadConfigWithPlugins loads the containerd server config from the provided path
 // and using the migration functions from the provided plugins.
+//
+// If the root config file does not set imports, the caller-provided out.Imports
+// is used as the default import list. An explicit imports value in the root
+// config, including an empty list, replaces the default.
 func LoadConfigWithPlugins(ctx context.Context, path string, plugins PluginFunc, out *Config) error {
 	if out == nil {
 		return fmt.Errorf("argument out must not be nil: %w", errdefs.ErrInvalidArgument)
@@ -472,12 +478,12 @@ func LoadConfigWithPlugins(ctx context.Context, path string, plugins PluginFunc,
 			return err
 		}
 
-		// Check to make sure drop-in configs does not have a higher version than the root config version
-		if rootConfigVersion == 0 {
-			rootConfigVersion = config.Version
-		}
-		if config.Version > rootConfigVersion {
-			return fmt.Errorf("drop-in config version %d higher than root config version %d", config.Version, rootConfigVersion)
+		isRootConfig := len(loaded) == 0
+		configVersion := effectiveConfigVersion(config.Version)
+		if isRootConfig {
+			rootConfigVersion = configVersion
+		} else if configVersion > rootConfigVersion {
+			return fmt.Errorf("drop-in config version %d higher than root config version %d", configVersion, rootConfigVersion)
 		}
 
 		if config.Version < out.Version {
@@ -505,6 +511,19 @@ func LoadConfigWithPlugins(ctx context.Context, path string, plugins PluginFunc,
 			log.G(ctx).WithField("t", time.Since(t1)).Warnf("Configuration migrated from version %d, use `containerd config migrate` to avoid migration", currentVersion)
 		}
 
+		// Caller-provided imports are defaults for the root config only. When
+		// the root omits imports, use those defaults; when it sets imports,
+		// including an empty list, replace the defaults before mergeConfig,
+		// which would otherwise union the slices. Imported configs do not
+		// inherit the caller-provided defaults.
+		if isRootConfig {
+			if config.Imports == nil {
+				config.Imports = slices.Clone(out.Imports)
+			} else {
+				out.Imports = config.Imports
+			}
+		}
+
 		if err := mergeConfig(out, config); err != nil {
 			return err
 		}
@@ -523,6 +542,13 @@ func LoadConfigWithPlugins(ctx context.Context, path string, plugins PluginFunc,
 		return fmt.Errorf("failed to load TOML from %s: %w", path, err)
 	}
 	return nil
+}
+
+func effectiveConfigVersion(configVersion int) int {
+	if configVersion == 0 {
+		return 1
+	}
+	return configVersion
 }
 
 // loadConfigFile decodes a TOML file at the given path

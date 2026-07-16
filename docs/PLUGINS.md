@@ -263,15 +263,17 @@ If you want to get the configuration combined with your configuration, run `cont
 ##### Version header
 
 containerd has several configuration versions:
-- Version 3 (Recommended for containerd 2.x): Introduced in containerd 2.0.
+- Version 4: Introduced in containerd 2.3. Server settings are configured as
+  plugins in this version.
+- Version 3: Introduced in containerd 2.0.
   Several plugin IDs have changed in this version.
-- Version 2 (Recommended for containerd 1.x): Introduced in containerd 1.3.
+- Version 2: Introduced in containerd 1.3.
   Still supported in containerd v2.x.
   Plugin IDs are changed to have prefixes like "io.containerd.".
-- Version 1: Introduced in containerd 1.0. Removed in containerd 2.0.
+- Version 1: Introduced in containerd 1.0. Still supported through migration.
 
-A configuration for Version 2 or 3 must specify the version `version = 2` or `version = 3` in the header, and must have
-fully qualified plugin IDs in the `[plugins]` section:
+A configuration for Version 2, 3, or 4 must specify the version in the header
+and must have fully qualified plugin IDs in the `[plugins]` section:
 ```toml
 version = 3
 

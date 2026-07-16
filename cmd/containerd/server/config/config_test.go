@@ -378,6 +378,16 @@ disabled_plugins = ["io.containerd.v1.xyz"]
 	assert.Errorf(t, err, "drop-in config version 3 higher than root config version 2")
 }
 
+func TestLoadConfigWithImportsRejectsHigherVersionThanHeaderlessRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "config.toml"), []byte(`imports = ["dropin.toml"]`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "dropin.toml"), []byte("version = 2\n"), 0o600))
+
+	var out Config
+	err := LoadConfig(context.Background(), filepath.Join(tempDir, "config.toml"), &out)
+	require.EqualError(t, err, "drop-in config version 2 higher than root config version 1")
+}
+
 // https://github.com/containerd/containerd/issues/10905
 func TestLoadConfigWithDefaultConfigVersion(t *testing.T) {
 	data1 := `
@@ -418,32 +428,40 @@ func TestLoadConfigImportResolution(t *testing.T) {
 		wantDisabledPlugins []string
 	}{
 		{
-			name:              "root omitted imports keeps default in memory without loading dropins",
-			rootTOML:          "version = 2\n",
-			defaultDropinTOML: defaultDropin,
-			wantImports:       []string{"DEFAULT_GLOB"},
+			name:                "root omitted imports loads default dropins",
+			rootTOML:            "version = 2\n",
+			defaultDropinTOML:   defaultDropin,
+			wantImports:         []string{"DEFAULT_GLOB"},
+			wantDisabledPlugins: []string{"io.containerd.test.v1.default"},
 		},
 		{
-			name:              "root empty imports keeps default in memory",
+			name:              "root empty imports opts out of default dropins",
 			rootTOML:          "version = 2\nimports = []\n",
 			defaultDropinTOML: defaultDropin,
-			wantImports:       []string{"DEFAULT_GLOB"},
+			wantImports:       []string{},
 		},
 		{
-			name:                "root custom imports appends to default in memory",
+			name:                "root custom imports replaces default",
 			rootTOML:            "version = 2\nimports = [\"custom.d/*.toml\"]\n",
 			defaultDropinTOML:   defaultDropin,
 			customDropinTOML:    customDropin,
-			wantImports:         []string{"DEFAULT_GLOB", "custom.d/*.toml"},
+			wantImports:         []string{"custom.d/*.toml"},
 			wantDisabledPlugins: []string{"io.containerd.test.v1.custom"},
 		},
 		{
-			name:                "dropin omitted imports does not recursively fall back to default",
+			name:                "dropin omitted imports does not inherit default",
 			rootTOML:            "version = 2\nimports = [\"custom.d/custom.toml\"]\n",
 			defaultDropinTOML:   defaultDropin,
 			customDropinTOML:    customDropin, // has no imports line
-			wantImports:         []string{"DEFAULT_GLOB", "custom.d/custom.toml"},
+			wantImports:         []string{"custom.d/custom.toml"},
 			wantDisabledPlugins: []string{"io.containerd.test.v1.custom"},
+		},
+		{
+			name:                "dropin empty imports does not reset root imports",
+			rootTOML:            "version = 2\n",
+			defaultDropinTOML:   "version = 2\nimports = []\ndisabled_plugins = [\"io.containerd.test.v1.default\"]\n",
+			wantImports:         []string{"DEFAULT_GLOB"},
+			wantDisabledPlugins: []string{"io.containerd.test.v1.default"},
 		},
 	}
 

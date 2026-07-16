@@ -69,10 +69,7 @@ func outputConfig(ctx context.Context, config *srvconfig.Config) error {
 		}
 	}
 
-	// for the time being, keep the defaultConfig's version set at 1 so that
-	// when a config without a version is loaded from disk and has no version
-	// set, we assume it's a v1 config.  But when generating new configs via
-	// this command, generate the max configuration version
+	// Always output the latest supported configuration version.
 	config.Version = version.ConfigVersion
 
 	return toml.NewEncoder(os.Stdout).SetIndentTables(true).Encode(config)
