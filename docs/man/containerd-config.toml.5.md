@@ -187,9 +187,10 @@ separately (for example vendors may keep a custom runtime configuration in a
 separate file without modifying the main `config.toml`).
 If the root configuration does not set `imports`, containerd loads files that
 match the platform default: `/etc/containerd/conf.d/*.toml` on Unix and
-`%ProgramFiles%\containerd\conf.d\*.toml` on Windows. Set `imports = []` in
-the root configuration to disable drop-ins. Imported files may declare their
-own imports, but they do not inherit the platform default.
+`%ProgramFiles%\containerd\conf.d\*.toml` on Windows. This default also applies
+when the root configuration file does not exist. Set `imports = []` in the root
+configuration to disable drop-ins. Imported files may declare their own
+imports, but they do not inherit the platform default.
 Imported files will overwrite simple fields like `int` or
 `string` (if not empty) and will append `array` and `map` fields.
 Imported files are also versioned, and the version can't be higher than

@@ -20,12 +20,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"iter"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"time"
 
 	"github.com/containerd/containerd/v2/cmd/containerd/server"
@@ -37,8 +35,6 @@ import (
 	"github.com/containerd/containerd/v2/version"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
-	"github.com/containerd/plugin"
-	"github.com/containerd/plugin/registry"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc/grpclog"
@@ -144,18 +140,8 @@ can be used and modified as necessary as a custom configuration.`
 
 		defer cancel()
 
-		// Only try to load the config if it either exists, or the user explicitly
-		// told us to load this path.
-		configPath := cliContext.String("config")
-		_, err := os.Stat(configPath)
-		if !os.IsNotExist(err) || cliContext.IsSet("config") {
-			g := registry.Graph(func(*plugin.Registration) bool { return false })
-			plugins := func() iter.Seq[plugin.Registration] {
-				return slices.Values(g)
-			}
-			if err := srvconfig.LoadConfigWithPlugins(ctx, configPath, plugins, config); err != nil {
-				return err
-			}
+		if err := loadConfig(ctx, cliContext.String("config"), cliContext.IsSet("config"), config); err != nil {
+			return err
 		}
 
 		// Apply flags to the config

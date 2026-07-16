@@ -109,15 +109,22 @@ func dumpConfig(cliContext *cli.Context) error {
 	config := defaultConfig()
 	ctx := cliContext.Context
 
-	g := registry.Graph(func(*plugin.Registration) bool { return false })
-	plugins := func() iter.Seq[plugin.Registration] {
-		return slices.Values(g)
-	}
-	if err := srvconfig.LoadConfigWithPlugins(ctx, cliContext.String("config"), plugins, config); err != nil && !os.IsNotExist(err) {
+	if err := loadConfig(ctx, cliContext.String("config"), cliContext.IsSet("config"), config); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 
 	return outputConfig(ctx, config)
+}
+
+func loadConfig(ctx context.Context, path string, required bool, config *srvconfig.Config) error {
+	g := registry.Graph(func(*plugin.Registration) bool { return false })
+	plugins := func() iter.Seq[plugin.Registration] {
+		return slices.Values(g)
+	}
+	if required {
+		return srvconfig.LoadConfigWithPlugins(ctx, path, plugins, config)
+	}
+	return srvconfig.LoadConfigWithPluginsOptional(ctx, path, plugins, config)
 }
 
 func platformAgnosticDefaultConfig() *srvconfig.Config {

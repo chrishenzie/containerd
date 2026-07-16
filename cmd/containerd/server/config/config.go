@@ -455,6 +455,17 @@ type PluginFunc func() iter.Seq[plugin.Registration]
 // is used as the default import list. An explicit imports value in the root
 // config, including an empty list, replaces the default.
 func LoadConfigWithPlugins(ctx context.Context, path string, plugins PluginFunc, out *Config) error {
+	return loadConfigWithPlugins(ctx, path, plugins, out, false)
+}
+
+// LoadConfigWithPluginsOptional loads the containerd server config from the
+// provided path when it exists. If the path does not exist, caller-provided
+// out.Imports are loaded relative to that path.
+func LoadConfigWithPluginsOptional(ctx context.Context, path string, plugins PluginFunc, out *Config) error {
+	return loadConfigWithPlugins(ctx, path, plugins, out, true)
+}
+
+func loadConfigWithPlugins(ctx context.Context, path string, plugins PluginFunc, out *Config, optionalRoot bool) error {
 	if out == nil {
 		return fmt.Errorf("argument out must not be nil: %w", errdefs.ErrInvalidArgument)
 	}
@@ -473,12 +484,22 @@ func LoadConfigWithPlugins(ctx context.Context, path string, plugins PluginFunc,
 			continue
 		}
 
+		isRootConfig := len(loaded) == 0
 		config, err := loadConfigFile(ctx, path)
 		if err != nil {
+			if optionalRoot && isRootConfig && os.IsNotExist(err) {
+				rootConfigVersion = effectiveConfigVersion(out.Version)
+				imports, err := resolveImports(path, out.Imports)
+				if err != nil {
+					return err
+				}
+				loaded[path] = true
+				pending = append(pending, imports...)
+				continue
+			}
 			return err
 		}
 
-		isRootConfig := len(loaded) == 0
 		configVersion := effectiveConfigVersion(config.Version)
 		if isRootConfig {
 			rootConfigVersion = configVersion

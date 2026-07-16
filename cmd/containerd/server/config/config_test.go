@@ -507,6 +507,77 @@ func TestLoadConfigImportResolution(t *testing.T) {
 	}
 }
 
+func TestLoadConfigWithPluginsOptional(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("loads imports relative to missing root", func(t *testing.T) {
+		tempDir := t.TempDir()
+		dropinDir := filepath.Join(tempDir, "conf.d")
+		nestedDir := filepath.Join(tempDir, "nested")
+		require.NoError(t, os.MkdirAll(dropinDir, 0o700))
+		require.NoError(t, os.MkdirAll(nestedDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dropinDir, "default.toml"), []byte(`
+imports = ["../nested/config.toml"]
+disabled_plugins = ["cri"]
+`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "config.toml"), []byte("root = \"from-nested-import\"\n"), 0o600))
+
+		out := Config{
+			Version: version.ConfigVersion,
+			Root:    "default-root",
+			Imports: []string{"conf.d/*.toml"},
+		}
+		err := LoadConfigWithPluginsOptional(ctx, filepath.Join(tempDir, "config.toml"), nil, &out)
+		require.NoError(t, err)
+		assert.Equal(t, "from-nested-import", out.Root)
+		assert.Equal(t, []string{"io.containerd.grpc.v1.cri"}, out.DisabledPlugins)
+	})
+
+	t.Run("succeeds when import glob has no matches", func(t *testing.T) {
+		tempDir := t.TempDir()
+		out := Config{
+			Version: version.ConfigVersion,
+			Root:    "default-root",
+			Imports: []string{"conf.d/*.toml"},
+		}
+
+		err := LoadConfigWithPluginsOptional(ctx, filepath.Join(tempDir, "config.toml"), nil, &out)
+		require.NoError(t, err)
+		assert.Equal(t, "default-root", out.Root)
+	})
+
+	t.Run("uses caller version as dropin ceiling", func(t *testing.T) {
+		tempDir := t.TempDir()
+		dropinDir := filepath.Join(tempDir, "conf.d")
+		require.NoError(t, os.MkdirAll(dropinDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dropinDir, "newer.toml"), []byte(fmt.Sprintf("version = %d\n", version.ConfigVersion+1)), 0o600))
+
+		out := Config{
+			Version: version.ConfigVersion,
+			Imports: []string{"conf.d/*.toml"},
+		}
+		err := LoadConfigWithPluginsOptional(ctx, filepath.Join(tempDir, "config.toml"), nil, &out)
+		require.EqualError(t, err, fmt.Sprintf("drop-in config version %d higher than root config version %d", version.ConfigVersion+1, version.ConfigVersion))
+	})
+
+	t.Run("strict loader rejects missing root", func(t *testing.T) {
+		var out Config
+		err := LoadConfigWithPlugins(ctx, filepath.Join(t.TempDir(), "config.toml"), nil, &out)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("returns missing named import", func(t *testing.T) {
+		tempDir := t.TempDir()
+		out := Config{
+			Version: version.ConfigVersion,
+			Imports: []string{"missing.toml"},
+		}
+
+		err := LoadConfigWithPluginsOptional(ctx, filepath.Join(tempDir, "config.toml"), nil, &out)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+}
+
 func TestDecodePlugin(t *testing.T) {
 	ctx := logtest.WithT(context.Background(), t)
 	data := `
