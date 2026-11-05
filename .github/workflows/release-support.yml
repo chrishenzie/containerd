@@ -1,6 +1,8 @@
 name: Release support
 
 on:
+  push:
+    branches: [release-support-fork-test]
   workflow_dispatch:
   schedule:
     - cron: "0 0 * * *"
@@ -30,7 +32,7 @@ jobs:
 
   update:
     runs-on: ubuntu-latest
-    if: github.repository == 'containerd/containerd' && github.event_name != 'pull_request'
+    if: github.repository == 'chrishenzie/containerd' && github.event_name != 'pull_request'
     name: Open a pull request when RELEASES.md is stale
     timeout-minutes: 10
     concurrency: release-support-update
@@ -40,7 +42,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
           persist-credentials: false
 
       - uses: ./.github/actions/install-go
